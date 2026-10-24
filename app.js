@@ -1,17 +1,18 @@
 // Hide Email — одноразовая почта в браузере.
-// Почту принимает публичный сервис mail.tm (запасной — mail.gw с тем же API):
-// сайт создаёт на нём ящик, хранит пароль в localStorage и раз в 5 секунд
-// спрашивает, не пришло ли письмо. Своего сервера нет.
+// Своего сервера нет: ящик создаётся у публичного сервиса временной почты,
+// сайт хранит доступ к нему в localStorage и раз в 5 секунд спрашивает, не пришло ли письмо.
+// Сервисов несколько: если один недоступен из твоей сети, пробуется следующий.
 
-const PROVIDERS = ['https://api.mail.tm', 'https://api.mail.gw'];
 const POLL_MS = 5000;
+const TIMEOUT_MS = 10000;
 const STORE = 'hidemail-v1';
 
 const $ = id => document.getElementById(id);
 
 // ---------- состояние ----------
-// accounts: [{ api, id, address, password, token, createdAt }]
+// accounts: [{ kind, api, address, token, ...поля сервиса, createdAt }]
 // known: { [address]: [id письма, ...] } — чтобы понять, какие письма новые
+// seen:  { [address]: [id, ...] } — прочитанные, для сервисов, которые сами этого не помнят
 let state = load();
 let messages = [];          // письма текущего ящика
 let openedId = null;        // открытое письмо
@@ -21,51 +22,37 @@ let polling = false;
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE));
-    if (s && Array.isArray(s.accounts)) return { known: {}, ...s };
+    if (s && Array.isArray(s.accounts)) return { known: {}, seen: {}, ...s };
   } catch {}
-  return { accounts: [], current: null, known: {} };
+  return { accounts: [], current: null, known: {}, seen: {} };
 }
 function save() {
   try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
 }
 const currentAcc = () => state.accounts.find(a => a.address === state.current) || null;
 
-// ---------- API ----------
+// ---------- сеть ----------
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Запрос к API. Сам обновляет токен на 401 и ждёт на 429 (лимит ~8 запросов/сек).
-async function api(base, path, { method = 'GET', body, acc, retry = 2 } = {}) {
-  const headers = { Accept: 'application/json' };
-  if (body) headers['Content-Type'] = method === 'PATCH' ? 'application/merge-patch+json' : 'application/json';
-  if (acc?.token) headers.Authorization = 'Bearer ' + acc.token;
-
-  const res = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
-
-  if (res.status === 401 && acc && retry > 0) {
-    await login(acc);
-    return api(base, path, { method, body, acc, retry: retry - 1 });
-  }
-  if (res.status === 429 && retry > 0) {
-    await sleep(1500);
-    return api(base, path, { method, body, acc, retry: retry - 1 });
-  }
-  if (!res.ok) {
-    let msg = res.status + '';
-    try { const j = await res.json(); msg = j.detail || j['hydra:description'] || j.message || msg; } catch {}
-    const err = new Error(msg); err.status = res.status; throw err;
-  }
-  return res.status === 204 ? null : res.json();
+// fetch с таймаутом: заблокированный сервер иногда не отвечает вовсе, а не отказывает сразу
+async function request(url, { method = 'GET', headers = {}, body } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method, headers: { Accept: 'application/json', ...headers }, body, signal: ctrl.signal });
+    if (!res.ok) {
+      let msg = 'ошибка ' + res.status;
+      try { const j = await res.json(); msg = j.detail || j['hydra:description'] || j.message || j.error || msg; } catch {}
+      const err = new Error(msg); err.status = res.status; throw err;
+    }
+    return res.status === 204 ? null : res.json();
+  } finally { clearTimeout(timer); }
 }
 
-// Ответы бывают в двух форматах: обычный массив или Hydra { "hydra:member": [...] }
-const list = j => Array.isArray(j) ? j : (j?.['hydra:member'] || []);
-
-async function login(acc) {
-  const j = await api(acc.api, '/token', { method: 'POST', body: { address: acc.address, password: acc.password } });
-  acc.token = j.token;
-  acc.id = j.id || acc.id;
-  save();
-}
+// «Load failed» (Safari) и «Failed to fetch» (Chrome) — браузер вообще не получил ответа:
+// сервер недоступен из этой сети или запрос заблокирован
+const netError = e => e.name === 'AbortError' ? 'сервер не ответил за 10 секунд'
+  : e instanceof TypeError ? 'нет связи с сервером' : e.message;
 
 // Читаемое случайное имя: слог + слог + цифры, например "lomira482"
 function randomLogin() {
@@ -80,23 +67,154 @@ function randomPassword() {
   return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 20);
 }
 
-// «Load failed» (Safari) и «Failed to fetch» (Chrome) — браузер вообще не получил ответа:
-// сервер недоступен из этой сети или запрос заблокирован
-const netError = e => e instanceof TypeError ? 'нет связи с сервером' : e.message;
+// ---------- сервисы ----------
+// У каждого сервиса одинаковый набор методов. Письма приводятся к одному виду:
+// список — { id, from: { name, address }, subject, intro, seen, createdAt }
+// письмо — { from, createdAt, html, text }
+
+// mail.tm и mail.gw: один и тот же API, ящик с паролем, письма хранятся на сервере
+function mailTm(base, name) {
+  async function call(acc, path, { method = 'GET', body, retry = 2 } = {}) {
+    const headers = {};
+    if (body) headers['Content-Type'] = method === 'PATCH' ? 'application/merge-patch+json' : 'application/json';
+    if (acc?.token) headers.Authorization = 'Bearer ' + acc.token;
+    try {
+      return await request(base + path, { method, headers, body: body && JSON.stringify(body) });
+    } catch (e) {
+      if (e.status === 401 && acc && retry > 0) { await login(acc); return call(acc, path, { method, body, retry: retry - 1 }); }
+      if (e.status === 429 && retry > 0) { await sleep(1500); return call(acc, path, { method, body, retry: retry - 1 }); }
+      throw e;
+    }
+  }
+  async function login(acc) {
+    const j = await call(null, '/token', { method: 'POST', body: { address: acc.address, password: acc.password } });
+    acc.token = j.token; acc.id = j.id || acc.id;
+    save();
+  }
+  // Ответы бывают обычным массивом или в формате Hydra { "hydra:member": [...] }
+  const list = j => Array.isArray(j) ? j : (j?.['hydra:member'] || []);
+
+  return {
+    kind: base, name, checkUrl: base + '/domains',
+    async create() {
+      const domains = list(await call(null, '/domains')).filter(d => d.isActive !== false && !d.isPrivate);
+      if (!domains.length) throw new Error('нет доступных доменов');
+      const domain = domains[Math.floor(Math.random() * domains.length)].domain;
+      const acc = { kind: base, api: base, address: `${randomLogin()}@${domain}`, password: randomPassword() };
+      acc.id = (await call(null, '/accounts', { method: 'POST', body: { address: acc.address, password: acc.password } })).id;
+      await login(acc);
+      return acc;
+    },
+    async list(acc) { return list(await call(acc, '/messages?page=1', { acc })); },
+    async get(acc, id) {
+      const m = await call(acc, '/messages/' + id);
+      return { from: m.from, createdAt: m.createdAt, html: Array.isArray(m.html) ? m.html.join('') : (m.html || ''), text: m.text || '' };
+    },
+    markSeen: (acc, id) => call(acc, '/messages/' + id, { method: 'PATCH', body: { seen: true } }),
+    remove: (acc, id) => call(acc, '/messages/' + id, { method: 'DELETE' }),
+    destroy: acc => call(acc, '/accounts/' + acc.id, { method: 'DELETE' }),
+  };
+}
+
+// Разбирает "Имя <addr@host>" на части
+function parseFrom(s = '') {
+  const m = String(s).match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  return m ? { name: m[1].trim(), address: m[2].trim() } : { name: '', address: String(s).trim() };
+}
+const stripHtml = h => new DOMParser().parseFromString(h || '', 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
+
+// tempmail.lol: ящик живёт около часа, письма отдаются списком целиком.
+// id у писем нет — составляем из даты, отправителя и темы. Полученные письма держим в памяти.
+const lolCache = new Map();   // address → Map(id → письмо)
+const tempmailLol = {
+  kind: 'tempmail.lol', name: 'tempmail.lol', checkUrl: 'https://api.tempmail.lol/v2/inbox?token=check',
+  async create() {
+    const j = await request('https://api.tempmail.lol/v2/inbox/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if (!j?.address || !j?.token) throw new Error('сервис вернул пустой ответ');
+    return { kind: this.kind, address: j.address, token: j.token };
+  },
+  async list(acc) {
+    const j = await request('https://api.tempmail.lol/v2/inbox?token=' + encodeURIComponent(acc.token));
+    if (j.expired) { const e = new Error('ящик истёк'); e.status = 410; throw e; }
+    const cache = lolCache.get(acc.address) || new Map();
+    lolCache.set(acc.address, cache);
+    for (const m of j.emails || []) {
+      const id = [m.date, m.from, m.subject].join('|');
+      cache.set(id, m);
+    }
+    return [...cache].map(([id, m]) => ({
+      id, from: parseFrom(m.from), subject: m.subject, intro: (m.body || stripHtml(m.html)).slice(0, 160),
+      createdAt: new Date(m.date).toISOString(),
+    })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+  async get(acc, id) {
+    const m = lolCache.get(acc.address)?.get(id);
+    if (!m) throw new Error('письмо больше недоступно');
+    return { from: parseFrom(m.from), createdAt: new Date(m.date).toISOString(), html: m.html || '', text: m.body || '' };
+  },
+  async remove(acc, id) { lolCache.get(acc.address)?.delete(id); },
+};
+
+// Guerrilla Mail: сессия по sid_token, после ~18 минут без запросов её можно восстановить по имени ящика
+const GM = 'https://api.guerrillamail.com/ajax.php';
+const gm = (params, acc) => request(GM + '?' + new URLSearchParams({ ...params, ...(acc ? { sid_token: acc.token } : {}) }));
+const guerrilla = {
+  kind: 'guerrilla', name: 'guerrillamail.com', checkUrl: GM + '?f=get_email_address',
+  async create() {
+    const j = await gm({ f: 'get_email_address', lang: 'en' });
+    if (!j?.email_addr) throw new Error('сервис вернул пустой ответ');
+    return { kind: this.kind, address: j.email_addr, token: j.sid_token, user: j.email_addr.split('@')[0], touched: Date.now() };
+  },
+  async list(acc) {
+    if (Date.now() - (acc.touched || 0) > 10 * 60 * 1000) {       // сессия могла истечь — восстанавливаем ящик
+      const j = await gm({ f: 'set_email_user', email_user: acc.user, lang: 'en' }, acc);
+      if (j.sid_token) acc.token = j.sid_token;
+    }
+    const j = await gm({ f: 'get_email_list', offset: 0 }, acc);
+    if (j.sid_token) acc.token = j.sid_token;
+    acc.touched = Date.now();
+    save();
+    return (j.list || [])
+      .filter(m => !/guerrillamail\.com$/i.test(m.mail_from || ''))     // приветственное письмо самого сервиса
+      .map(m => ({
+        id: String(m.mail_id), from: parseFrom(m.mail_from), subject: m.mail_subject, intro: stripHtml(m.mail_excerpt),
+        createdAt: new Date(Number(m.mail_timestamp) * 1000).toISOString(),
+      }));
+  },
+  async get(acc, id) {
+    const m = await gm({ f: 'fetch_email', email_id: id }, acc);
+    return { from: parseFrom(m.mail_from), createdAt: new Date(Number(m.mail_timestamp) * 1000).toISOString(), html: m.mail_body || '', text: '' };
+  },
+  remove: (acc, id) => gm({ f: 'del_email', 'email_ids[]': id }, acc),
+};
+
+const PROVIDERS = [
+  mailTm('https://api.mail.tm', 'mail.tm'),
+  mailTm('https://api.mail.gw', 'mail.gw'),
+  tempmailLol,
+  guerrilla,
+];
+// старые адреса сохранены без kind — это mail.tm/mail.gw, у них kind = адрес API
+const providerOf = acc => PROVIDERS.find(p => p.kind === (acc.kind || acc.api));
+
+// Прочитанность: mail.tm помнит её сам, для остальных храним локально
+const isSeen = (acc, m) => m.seen ?? (state.seen[acc.address] || []).includes(m.id);
+function markSeen(acc, id) {
+  const p = providerOf(acc);
+  if (p.markSeen) p.markSeen(acc, id).catch(() => {});
+  else { (state.seen[acc.address] ||= []).push(id); save(); }
+}
 
 async function createAccount() {
   const errors = [];
-  for (const base of PROVIDERS) {
+  for (const p of PROVIDERS) {
     try {
-      const domains = list(await api(base, '/domains')).filter(d => d.isActive !== false && !d.isPrivate);
-      if (!domains.length) throw new Error('нет доступных доменов');
-      const domain = domains[Math.floor(Math.random() * domains.length)].domain;
-      const acc = { api: base, address: `${randomLogin()}@${domain}`, password: randomPassword(), createdAt: Date.now() };
-      const created = await api(base, '/accounts', { method: 'POST', body: { address: acc.address, password: acc.password } });
-      acc.id = created.id;
-      await login(acc);
+      const acc = await p.create();
+      acc.createdAt = Date.now();
       return acc;
-    } catch (e) { errors.push({ base, msg: netError(e) }); }
+    } catch (e) { errors.push({ name: p.name, url: p.checkUrl, msg: netError(e) }); }
   }
   const err = new Error('все сервисы недоступны');
   err.details = errors;
@@ -121,7 +239,7 @@ async function onCreate(btn) {
     const copied = await copy(acc.address);
     toast(copied ? 'Почта создана и скопирована' : 'Почта создана');
   } catch (e) {
-    showCreateError(e.details || [{ base: '', msg: netError(e) }]);
+    showCreateError(e.details || [{ msg: netError(e) }]);
   } finally {
     btn.disabled = false; btn.textContent = label;
   }
@@ -134,9 +252,9 @@ function showCreateError(details) {
   ul.innerHTML = '';
   for (const d of details) {
     const li = el('li');
-    if (d.base) {
-      const a = el('a', '', new URL(d.base).hostname);
-      a.href = d.base + '/domains'; a.target = '_blank'; a.rel = 'noopener';
+    if (d.url) {
+      const a = el('a', '', d.name);
+      a.href = d.url; a.target = '_blank'; a.rel = 'noopener';
       li.append(a, ': ');
     }
     li.append(d.msg);
@@ -163,8 +281,9 @@ async function poll() {
   polling = true;
   setStatus('busy', 'Проверяю…');
   try {
-    const fresh = list(await api(acc.api, '/messages?page=1', { acc }));
+    const fresh = await providerOf(acc).list(acc);
     if (acc !== currentAcc()) return;      // пока ждали ответ, переключили адрес
+    for (const m of fresh) m.seen = isSeen(acc, m);
     const known = new Set(state.known[acc.address] || []);
     const arrived = fresh.filter(m => !known.has(m.id));
     messages = fresh;
@@ -177,7 +296,7 @@ async function poll() {
     updateBadge();
     setStatus('ok', 'Обновлено ' + timeShort(new Date()));
   } catch (e) {
-    setStatus('off', e.status === 401 ? 'Ящик удалён сервисом' : 'Нет связи, повторю');
+    setStatus('off', e.status === 401 || e.status === 410 ? 'Ящик удалён сервисом' : 'Нет связи, повторю');
   } finally {
     polling = false;
   }
@@ -208,15 +327,14 @@ async function openMessage(id) {
   openSheet(sheet);
 
   try {
-    const m = await api(acc.api, '/messages/' + id, { acc });
+    const m = await providerOf(acc).get(acc, id);
     if (openedId !== id) return;
     $('msg-meta').textContent = `${fromText(m.from)} · ${new Date(m.createdAt).toLocaleString('ru-RU')}`;
-    const html = Array.isArray(m.html) ? m.html.join('') : (m.html || '');
-    renderActions(html, m.text || '');
-    renderBody(html, m.text || '');
-    if (!m.seen) {
-      api(acc.api, '/messages/' + id, { method: 'PATCH', body: { seen: true }, acc }).catch(() => {});
-      if (preview) preview.seen = true;
+    renderActions(m.html, m.text);
+    renderBody(m.html, m.text);
+    if (preview && !preview.seen) {
+      markSeen(acc, id);
+      preview.seen = true;
       renderInbox(); updateBadge();
     }
   } catch (e) {
@@ -231,7 +349,7 @@ async function deleteMessage() {
   const acc = currentAcc();
   if (!openedId || !confirm('Удалить это письмо?')) return;
   try {
-    await api(acc.api, '/messages/' + openedId, { method: 'DELETE', acc });
+    await providerOf(acc).remove(acc, openedId);
     messages = messages.filter(m => m.id !== openedId);
     closeSheet($('sheet'));
     renderInbox(); updateBadge();
@@ -241,9 +359,10 @@ async function deleteMessage() {
 async function deleteAccount(address) {
   const acc = state.accounts.find(a => a.address === address);
   if (!acc || !confirm(`Удалить ${address}?\nПисьма на этот адрес больше не придут.`)) return;
-  try { await api(acc.api, '/accounts/' + acc.id, { method: 'DELETE', acc }); } catch {}  // ящик мог уже исчезнуть у сервиса
+  try { await providerOf(acc).destroy?.(acc); } catch {}  // ящик мог уже исчезнуть у сервиса
   state.accounts = state.accounts.filter(a => a !== acc);
   delete state.known[address];
+  delete state.seen[address];
   if (state.current === address) { state.current = state.accounts[0]?.address || null; messages = []; }
   save();
   render(); renderAccounts(); startPolling();
@@ -408,7 +527,8 @@ function renderAccounts() {
     const main = el('button', 'acc-main');
     main.type = 'button';
     main.append(el('div', 'acc-addr', a.address),
-      el('div', 'acc-date', (a.address === state.current ? 'Открыт · ' : '') + 'создан ' + new Date(a.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })));
+      el('div', 'acc-date', (a.address === state.current ? 'Открыт · ' : '') + 'создан ' + new Date(a.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+        + ' · ' + (providerOf(a)?.name || '')));
     main.onclick = () => switchAccount(a.address);
     const del = el('button', 'btn ghost danger', 'Удалить');
     del.type = 'button';
