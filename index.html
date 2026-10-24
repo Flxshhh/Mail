@@ -18,7 +18,6 @@
 <body>
   <header class="topbar">
     <h1>Hide Email</h1>
-    <button id="btn-accounts" class="chip" type="button">Адреса <span id="acc-count">0</span></button>
   </header>
 
   <main>
@@ -40,12 +39,13 @@
 
     <!-- Текущий адрес -->
     <section id="current" class="card address-card" hidden>
-      <p class="label">Твой адрес</p>
+      <p class="label">Твой адрес · <span id="provider"></span></p>
       <button id="address" class="address" type="button" aria-label="Скопировать адрес"></button>
       <div class="row">
         <button id="btn-copy" class="btn primary" type="button">Копировать</button>
         <button id="btn-create" class="btn" type="button">Новая почта</button>
       </div>
+      <p class="muted small hint">Новая почта заменит эту: старый адрес и его письма удалятся.</p>
     </section>
 
     <!-- Входящие -->
@@ -74,19 +74,6 @@
       <p id="msg-meta" class="muted small"></p>
       <div id="msg-actions" class="actions"></div>
       <div id="msg-content" class="msg-content"></div>
-    </div>
-  </div>
-
-  <!-- Список адресов -->
-  <div id="accounts" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="acc-title">
-    <div class="sheet-bar">
-      <button id="btn-acc-close" class="btn ghost" type="button">‹ Назад</button>
-      <button id="btn-acc-new" class="btn ghost" type="button">+ Новая</button>
-    </div>
-    <div class="sheet-body">
-      <h2 id="acc-title">Мои адреса</h2>
-      <p class="muted small">Пароли хранятся только в этом браузере. Удалил адрес — письма на него больше не придут.</p>
-      <ul id="acc-list" class="acc-list"></ul>
     </div>
   </div>
 

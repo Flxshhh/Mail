@@ -10,7 +10,7 @@ const STORE = 'hidemail-v1';
 const $ = id => document.getElementById(id);
 
 // ---------- состояние ----------
-// accounts: [{ kind, api, address, token, ...поля сервиса, createdAt }]
+// accounts: [{ kind, api, address, token, ...поля сервиса, createdAt }] — всегда не больше одного
 // known: { [address]: [id письма, ...] } — чтобы понять, какие письма новые
 // seen:  { [address]: [id, ...] } — прочитанные, для сервисов, которые сами этого не помнят
 let state = load();
@@ -263,18 +263,26 @@ async function createAccount() {
 }
 
 // ---------- действия ----------
+// Адрес всегда один: новый заменяет старый, а старый удаляется вместе с письмами.
+// Старый удаляем только после того, как новый точно создан, — иначе можно остаться ни с чем.
 async function onCreate(btn) {
+  const old = currentAcc();
+  if (old && !confirm(`Создать новый адрес?\n${old.address} и его письма удалятся.`)) return;
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Создаю…';
   $('create-error').hidden = true;
   try {
     const acc = await createAccount();
-    state.accounts.unshift(acc);
+    const previous = state.accounts;
+    state.accounts = [acc];
     state.current = acc.address;
-    state.known[acc.address] = [];
+    state.known = { [acc.address]: [] };
+    state.seen = {};
+    box = {};
     save();
+    saveBox();
+    for (const a of previous) providerOf(a)?.destroy?.(a).catch(() => {});   // ящик мог уже исчезнуть у сервиса
     messages = storedList(acc);
-    closeSheet($('accounts'));
     render();
     startPolling();
     const copied = await copy(acc.address);
@@ -425,27 +433,6 @@ async function deleteMessage() {
   renderInbox(); updateBadge();
 }
 
-async function deleteAccount(address) {
-  const acc = state.accounts.find(a => a.address === address);
-  if (!acc || !confirm(`Удалить ${address}?\nПисьма на этот адрес больше не придут.`)) return;
-  try { await providerOf(acc).destroy?.(acc); } catch {}  // ящик мог уже исчезнуть у сервиса
-  state.accounts = state.accounts.filter(a => a !== acc);
-  delete state.known[address];
-  delete state.seen[address];
-  delete box[address];
-  if (state.current === address) { state.current = state.accounts[0]?.address || null; messages = storedList(currentAcc()); }
-  save();
-  saveBox();
-  render(); renderAccounts(); startPolling();
-}
-
-function switchAccount(address) {
-  state.current = address;
-  messages = storedList(currentAcc());
-  save();
-  closeSheet($('accounts'));
-  render(); startPolling();
-}
 
 // ---------- разбор письма: ссылки подтверждения и коды ----------
 const CONFIRM_RE = /verif|confirm|activat|valid|magic|sign.?in|log.?in|register|complete|continue|token|подтвер|актив|войти|вход|продолж|завершить/i;
@@ -564,11 +551,13 @@ function setStatus(kind, text) {
 
 function render() {
   const acc = currentAcc();
-  $('acc-count').textContent = state.accounts.length;
   $('empty').hidden = !!acc;
   $('current').hidden = !acc;
   $('inbox-wrap').hidden = !acc;
-  if (acc) $('address').textContent = acc.address;
+  if (acc) {
+    $('address').textContent = acc.address;
+    $('provider').textContent = providerOf(acc)?.name || '';
+  }
   renderInbox();
 }
 
@@ -589,30 +578,11 @@ function renderInbox(newIds = new Set()) {
   }
 }
 
-function renderAccounts() {
-  const ul = $('acc-list');
-  ul.innerHTML = '';
-  if (!state.accounts.length) ul.append(el('li', 'muted', 'Адресов пока нет.'));
-  for (const a of state.accounts) {
-    const li = el('li', 'acc' + (a.address === state.current ? ' active' : ''));
-    const main = el('button', 'acc-main');
-    main.type = 'button';
-    main.append(el('div', 'acc-addr', a.address),
-      el('div', 'acc-date', (a.address === state.current ? 'Открыт · ' : '') + 'создан ' + new Date(a.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-        + ' · ' + (providerOf(a)?.name || '')));
-    main.onclick = () => switchAccount(a.address);
-    const del = el('button', 'btn ghost danger', 'Удалить');
-    del.type = 'button';
-    del.onclick = () => deleteAccount(a.address);
-    li.append(main, del);
-    ul.append(li);
-  }
-}
 
 function openSheet(s) { s.hidden = false; document.body.style.overflow = 'hidden'; }
 function closeSheet(s) {
   s.hidden = true;
-  if ($('sheet').hidden && $('accounts').hidden) document.body.style.overflow = '';
+  document.body.style.overflow = '';
   if (s.id === 'sheet') openedId = null;
 }
 
@@ -628,13 +598,10 @@ function toast(text) {
 // ---------- события ----------
 $('btn-create-first').onclick = e => onCreate(e.currentTarget);
 $('btn-create').onclick = e => onCreate(e.currentTarget);
-$('btn-acc-new').onclick = e => onCreate(e.currentTarget);
 $('btn-copy').onclick = async () => toast(await copy(currentAcc().address) ? 'Адрес скопирован' : 'Не удалось скопировать');
 $('address').onclick = () => $('btn-copy').click();
 $('btn-back').onclick = () => closeSheet($('sheet'));
 $('btn-delete-msg').onclick = deleteMessage;
-$('btn-accounts').onclick = () => { renderAccounts(); openSheet($('accounts')); };
-$('btn-acc-close').onclick = () => closeSheet($('accounts'));
 
 // вернулись в приложение — сразу проверяем почту
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
