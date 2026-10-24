@@ -104,11 +104,19 @@ main { max-width: 640px; margin: 0 auto; padding: 8px 16px 32px; display: grid; 
 .address-card .hint { margin: 12px 0 0; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-.inbox-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 4px; }
+.inbox-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 4px; }
+.inbox-tools { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pause {
+  flex: none; min-height: 36px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--primary); font-weight: 700; font-size: 14px;
+}
+.pause:active { transform: scale(.96); }
+.paused .pause { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .inbox-head h2 { margin: 0; font-size: 18px; }
 .status { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .status.off .dot { background: var(--danger); }
+.status.paused .dot { background: var(--muted); }
 .status.busy .dot { animation: blink 1s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .25; } }
 
@@ -136,6 +144,7 @@ main { max-width: 640px; margin: 0 auto; padding: 8px 16px 32px; display: grid; 
   width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%;
   background: var(--primary-soft); position: relative;
 }
+.paused .radar::after { animation: none; opacity: 0; }
 .radar::after {
   content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--primary);
   animation: ping 2s ease-out infinite;

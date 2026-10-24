@@ -278,6 +278,7 @@ async function onCreate(btn) {
     state.current = acc.address;
     state.known = { [acc.address]: [] };
     state.seen = {};
+    state.paused = false;      // новый адрес — значит, сейчас будешь ждать письмо
     box = {};
     save();
     saveBox();
@@ -326,7 +327,7 @@ async function copy(text) {
 
 async function poll() {
   const acc = currentAcc();
-  if (!acc || polling || document.hidden) return;
+  if (!acc || polling || document.hidden || state.paused) return;
   polling = true;
   setStatus('busy', 'Проверяю…');
   try {
@@ -361,6 +362,7 @@ async function poll() {
     setStatus('off', e.status === 401 || e.status === 410 ? 'Ящик удалён сервисом' : 'Ошибка: ' + netError(e) + ', повторю');
   } finally {
     polling = false;
+    if (state.paused) renderPause();
   }
 }
 
@@ -375,9 +377,28 @@ async function prefetch(acc, ids) {
 
 function startPolling() {
   clearInterval(pollTimer);
-  if (!currentAcc()) return;
+  renderPause();
+  if (!currentAcc() || state.paused) return;
   poll();
   pollTimer = setInterval(poll, POLL_MS);
+}
+
+// Кнопка «Стоп»: проверка не идёт, пока её снова не включат (запоминается и после перезапуска).
+// Свёрнутое приложение и так не проверяет почту — см. document.hidden в poll().
+function setPaused(paused) {
+  state.paused = paused;
+  save();
+  startPolling();
+}
+
+function renderPause() {
+  const paused = !!state.paused;
+  $('inbox-wrap').classList.toggle('paused', paused);
+  $('btn-pause').textContent = paused ? 'Продолжить' : 'Стоп';
+  $('empty-hint').textContent = paused
+    ? 'Проверка остановлена. Нажми «Продолжить», когда будешь ждать письмо.'
+    : 'Проверяю каждые 5 секунд. Не закрывай приложение, пока ждёшь письмо.';
+  if (paused) setStatus('paused', 'Остановлено');
 }
 
 // Значок с числом непрочитанных на иконке (iOS 16.4+ для приложения на экране «Домой»)
@@ -602,6 +623,7 @@ $('btn-copy').onclick = async () => toast(await copy(currentAcc().address) ? 'А
 $('address').onclick = () => $('btn-copy').click();
 $('btn-back').onclick = () => closeSheet($('sheet'));
 $('btn-delete-msg').onclick = deleteMessage;
+$('btn-pause').onclick = () => setPaused(!state.paused);
 
 // вернулись в приложение — сразу проверяем почту
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });

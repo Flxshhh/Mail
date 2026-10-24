@@ -52,13 +52,16 @@
     <section id="inbox-wrap" hidden>
       <div class="inbox-head">
         <h2>Входящие</h2>
-        <span id="status" class="status"><i class="dot"></i><span id="status-text">Проверяю…</span></span>
+        <div class="inbox-tools">
+          <span id="status" class="status"><i class="dot"></i><span id="status-text">Проверяю…</span></span>
+          <button id="btn-pause" class="pause" type="button">Стоп</button>
+        </div>
       </div>
       <ul id="inbox" class="inbox"></ul>
       <div id="inbox-empty" class="card empty-inbox" hidden>
         <div class="radar" aria-hidden="true"></div>
         <p>Писем пока нет</p>
-        <p class="muted small">Проверяю каждые 5 секунд. Не закрывай приложение, пока ждёшь письмо.</p>
+        <p id="empty-hint" class="muted small">Проверяю каждые 5 секунд. Не закрывай приложение, пока ждёшь письмо.</p>
       </div>
     </section>
   </main>
