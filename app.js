@@ -153,6 +153,14 @@ function parseFrom(s = '') {
   const m = String(s).match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
   return m ? { name: m[1].trim(), address: m[2].trim() } : { name: '', address: String(s).trim() };
 }
+// Дата в ISO из чего угодно: число (сек или мс), строка. Непонятную дату заменяем на «сейчас»,
+// чтобы одно странное письмо не ломало весь список
+function isoDate(v) {
+  if (typeof v === 'string' && /^\d+$/.test(v)) v = Number(v);
+  if (typeof v === 'number' && v < 1e12) v *= 1000;      // секунды → миллисекунды
+  const d = new Date(v ?? Date.now());
+  return isNaN(d) ? new Date().toISOString() : d.toISOString();
+}
 const stripHtml = h => new DOMParser().parseFromString(h || '', 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
 
 // tempmail.lol: ящик живёт около часа, письма отдаются списком целиком.
@@ -173,18 +181,18 @@ const tempmailLol = {
     const cache = lolCache.get(acc.address) || new Map();
     lolCache.set(acc.address, cache);
     for (const m of j.emails || []) {
-      const id = [m.date, m.from, m.subject].join('|');
+      const id = String(m.id ?? m._id ?? [m.date ?? m.createdAt, m.from, m.subject].join('|'));
       cache.set(id, m);
     }
     return [...cache].map(([id, m]) => ({
       id, from: parseFrom(m.from), subject: m.subject, intro: (m.body || stripHtml(m.html)).slice(0, 160),
-      createdAt: new Date(m.date).toISOString(),
+      createdAt: isoDate(m.date ?? m.createdAt),
     })).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
   async get(acc, id) {
     const m = lolCache.get(acc.address)?.get(id);
     if (!m) throw new Error('письмо больше недоступно');
-    return { from: parseFrom(m.from), createdAt: new Date(m.date).toISOString(), html: m.html || '', text: m.body || '' };
+    return { from: parseFrom(m.from), createdAt: isoDate(m.date ?? m.createdAt), html: m.html || '', text: m.body || m.text || '' };
   },
   async remove(acc, id) { lolCache.get(acc.address)?.delete(id); },
 };
@@ -212,12 +220,12 @@ const guerrilla = {
       .filter(m => !/guerrillamail\.com$/i.test(m.mail_from || ''))     // приветственное письмо самого сервиса
       .map(m => ({
         id: String(m.mail_id), from: parseFrom(m.mail_from), subject: m.mail_subject, intro: stripHtml(m.mail_excerpt),
-        createdAt: new Date(Number(m.mail_timestamp) * 1000).toISOString(),
+        createdAt: isoDate(m.mail_timestamp),
       }));
   },
   async get(acc, id) {
     const m = await gm({ f: 'fetch_email', email_id: id }, acc);
-    return { from: parseFrom(m.mail_from), createdAt: new Date(Number(m.mail_timestamp) * 1000).toISOString(), html: m.mail_body || '', text: '' };
+    return { from: parseFrom(m.mail_from), createdAt: isoDate(m.mail_timestamp), html: m.mail_body || '', text: '' };
   },
   remove: (acc, id) => gm({ f: 'del_email', 'email_ids[]': id }, acc),
 };
@@ -342,7 +350,7 @@ async function poll() {
     updateBadge();
     setStatus('ok', 'Обновлено ' + timeShort(new Date()));
   } catch (e) {
-    setStatus('off', e.status === 401 || e.status === 410 ? 'Ящик удалён сервисом' : 'Нет связи, повторю');
+    setStatus('off', e.status === 401 || e.status === 410 ? 'Ящик удалён сервисом' : 'Ошибка: ' + netError(e) + ', повторю');
   } finally {
     polling = false;
   }
