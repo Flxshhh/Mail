@@ -31,6 +31,38 @@ function save() {
 }
 const currentAcc = () => state.accounts.find(a => a.address === state.current) || null;
 
+// ---------- письма на устройстве ----------
+// Письма сохраняются в браузере: после перезагрузки они на месте, даже если сервис
+// их уже не отдаёт (tempmail.lol и Guerrilla Mail хранят письма около часа).
+// Хранятся отдельно от адресов: если место кончится, пострадают только старые письма.
+// box: { [address]: { list: [сводки], full: { [id]: письмо целиком }, deleted: [id] } }
+const MAIL_STORE = 'hidemail-mail';
+const MAX_PER_BOX = 50;
+let box = loadBox();
+
+function loadBox() {
+  try { return JSON.parse(localStorage.getItem(MAIL_STORE)) || {}; } catch { return {}; }
+}
+function saveBox() {
+  for (let i = 0; i < 50; i++) {
+    try { localStorage.setItem(MAIL_STORE, JSON.stringify(box)); return; }
+    catch { if (!dropOldestBody()) return; }   // места мало — выкидываем текст самого старого письма
+  }
+}
+function dropOldestBody() {
+  let oldest = null;
+  for (const [address, b] of Object.entries(box)) {
+    for (const [id, m] of Object.entries(b.full)) {
+      if (!oldest || String(m.createdAt) < oldest.at) oldest = { address, id, at: String(m.createdAt) };
+    }
+  }
+  if (!oldest) return false;
+  delete box[oldest.address].full[oldest.id];
+  return true;
+}
+const boxOf = address => (box[address] ||= { list: [], full: {}, deleted: [] });
+const storedList = acc => acc ? boxOf(acc.address).list.map(m => ({ ...m, seen: isSeen(acc, m) })) : [];
+
 // ---------- сеть ----------
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -200,11 +232,12 @@ const PROVIDERS = [
 const providerOf = acc => PROVIDERS.find(p => p.kind === (acc.kind || acc.api));
 
 // Прочитанность: mail.tm помнит её сам, для остальных храним локально
-const isSeen = (acc, m) => m.seen ?? (state.seen[acc.address] || []).includes(m.id);
+// Прочитанность помним локально; mail.tm дополнительно хранит её у себя
+const isSeen = (acc, m) => !!m.seen || (state.seen[acc.address] || []).includes(m.id);
 function markSeen(acc, id) {
-  const p = providerOf(acc);
-  if (p.markSeen) p.markSeen(acc, id).catch(() => {});
-  else { (state.seen[acc.address] ||= []).push(id); save(); }
+  providerOf(acc).markSeen?.(acc, id).catch(() => {});
+  (state.seen[acc.address] ||= []).push(id);
+  save();
 }
 
 async function createAccount() {
@@ -232,7 +265,7 @@ async function onCreate(btn) {
     state.current = acc.address;
     state.known[acc.address] = [];
     save();
-    messages = [];
+    messages = storedList(acc);
     closeSheet($('accounts'));
     render();
     startPolling();
@@ -283,12 +316,25 @@ async function poll() {
   try {
     const fresh = await providerOf(acc).list(acc);
     if (acc !== currentAcc()) return;      // пока ждали ответ, переключили адрес
-    for (const m of fresh) m.seen = isSeen(acc, m);
+    // объединяем с сохранёнными: письмо остаётся, даже если сервис его уже не отдаёт
+    const b = boxOf(acc.address);
+    const deleted = new Set(b.deleted);
+    const byId = new Map(b.list.map(m => [m.id, m]));
+    for (const m of fresh) if (!deleted.has(m.id)) byId.set(m.id, { ...m, seen: undefined });
+    b.list = [...byId.values()]
+      .sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))
+      .slice(0, MAX_PER_BOX);
+    const ids = new Set(b.list.map(m => m.id));
+    for (const id of Object.keys(b.full)) if (!ids.has(id)) delete b.full[id];
+    for (const m of fresh) if (m.seen && !isSeen(acc, { id: m.id })) (state.seen[acc.address] ||= []).push(m.id);
+
     const known = new Set(state.known[acc.address] || []);
-    const arrived = fresh.filter(m => !known.has(m.id));
-    messages = fresh;
-    state.known[acc.address] = fresh.map(m => m.id);
+    const arrived = b.list.filter(m => !known.has(m.id));
+    state.known[acc.address] = [...ids];
     save();
+    saveBox();
+    messages = storedList(acc);
+    if (arrived.length) prefetch(acc, arrived.map(m => m.id));
     renderInbox(new Set(arrived.map(m => m.id)));
     if (arrived.length) {
       toast(arrived.length === 1 ? 'Новое письмо: ' + (arrived[0].subject || 'без темы') : `Новых писем: ${arrived.length}`);
@@ -299,6 +345,15 @@ async function poll() {
     setStatus('off', e.status === 401 || e.status === 410 ? 'Ящик удалён сервисом' : 'Нет связи, повторю');
   } finally {
     polling = false;
+  }
+}
+
+// Сразу скачиваем новые письма целиком: код откроется мгновенно и останется после перезагрузки
+async function prefetch(acc, ids) {
+  const b = boxOf(acc.address);
+  for (const id of ids) {
+    if (b.full[id]) continue;
+    try { b.full[id] = await providerOf(acc).get(acc, id); saveBox(); } catch {}
   }
 }
 
@@ -327,7 +382,9 @@ async function openMessage(id) {
   openSheet(sheet);
 
   try {
-    const m = await providerOf(acc).get(acc, id);
+    const b = boxOf(acc.address);
+    const m = b.full[id] || await providerOf(acc).get(acc, id);
+    if (!b.full[id]) { b.full[id] = m; saveBox(); }
     if (openedId !== id) return;
     $('msg-meta').textContent = `${fromText(m.from)} · ${new Date(m.createdAt).toLocaleString('ru-RU')}`;
     renderActions(m.html, m.text);
@@ -348,12 +405,16 @@ async function openMessage(id) {
 async function deleteMessage() {
   const acc = currentAcc();
   if (!openedId || !confirm('Удалить это письмо?')) return;
-  try {
-    await providerOf(acc).remove(acc, openedId);
-    messages = messages.filter(m => m.id !== openedId);
-    closeSheet($('sheet'));
-    renderInbox(); updateBadge();
-  } catch (e) { toast('Не удалось удалить: ' + e.message); }
+  const id = openedId;
+  try { await providerOf(acc).remove(acc, id); } catch {}   // не вышло на сервере — всё равно прячем у себя
+  const b = boxOf(acc.address);
+  b.deleted.push(id);
+  b.list = b.list.filter(m => m.id !== id);
+  delete b.full[id];
+  saveBox();
+  messages = messages.filter(m => m.id !== id);
+  closeSheet($('sheet'));
+  renderInbox(); updateBadge();
 }
 
 async function deleteAccount(address) {
@@ -363,14 +424,16 @@ async function deleteAccount(address) {
   state.accounts = state.accounts.filter(a => a !== acc);
   delete state.known[address];
   delete state.seen[address];
-  if (state.current === address) { state.current = state.accounts[0]?.address || null; messages = []; }
+  delete box[address];
+  if (state.current === address) { state.current = state.accounts[0]?.address || null; messages = storedList(currentAcc()); }
   save();
+  saveBox();
   render(); renderAccounts(); startPolling();
 }
 
 function switchAccount(address) {
   state.current = address;
-  messages = [];
+  messages = storedList(currentAcc());
   save();
   closeSheet($('accounts'));
   render(); startPolling();
@@ -569,7 +632,11 @@ $('btn-acc-close').onclick = () => closeSheet($('accounts'));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 window.addEventListener('online', poll);
 
+messages = storedList(currentAcc());
 render();
 startPolling();
+
+// просим браузер не стирать данные сайта при нехватке места
+navigator.storage?.persist?.().catch(() => {});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

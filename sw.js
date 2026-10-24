@@ -1,7 +1,7 @@
 // Service worker: сохраняет само приложение на телефоне, чтобы оно открывалось мгновенно.
 // Запросы к почтовому API (другой домен) всегда идут в сеть.
 // При изменении файлов приложения увеличь версию — старый кэш удалится.
-const CACHE = 'hidemail-v3';
+const CACHE = 'hidemail-v4';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-180.png',
   'fonts/manrope-cyrillic-wght-normal.woff2', 'fonts/manrope-latin-wght-normal.woff2'];
 
