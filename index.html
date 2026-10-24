@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F5F3FF" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0F0B1F" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Почта">
+  <title>Hide Email</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Hide Email</h1>
+    <button id="btn-accounts" class="chip" type="button">Адреса <span id="acc-count">0</span></button>
+  </header>
+
+  <main>
+    <!-- Пусто: ещё нет ни одного адреса -->
+    <section id="empty" class="card hero" hidden>
+      <p class="hero-title">Одноразовая почта</p>
+      <p class="muted">Создай адрес, укажи его при регистрации — письмо с подтверждением появится здесь.</p>
+      <button id="btn-create-first" class="btn primary big" type="button">Создать почту</button>
+    </section>
+
+    <!-- Текущий адрес -->
+    <section id="current" class="card address-card" hidden>
+      <p class="label">Твой адрес</p>
+      <button id="address" class="address" type="button" aria-label="Скопировать адрес"></button>
+      <div class="row">
+        <button id="btn-copy" class="btn primary" type="button">Копировать</button>
+        <button id="btn-create" class="btn" type="button">Новая почта</button>
+      </div>
+    </section>
+
+    <!-- Входящие -->
+    <section id="inbox-wrap" hidden>
+      <div class="inbox-head">
+        <h2>Входящие</h2>
+        <span id="status" class="status"><i class="dot"></i><span id="status-text">Проверяю…</span></span>
+      </div>
+      <ul id="inbox" class="inbox"></ul>
+      <div id="inbox-empty" class="card empty-inbox" hidden>
+        <div class="radar" aria-hidden="true"></div>
+        <p>Писем пока нет</p>
+        <p class="muted small">Проверяю каждые 5 секунд. Не закрывай приложение, пока ждёшь письмо.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Письмо -->
+  <div id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="msg-subject">
+    <div class="sheet-bar">
+      <button id="btn-back" class="btn ghost" type="button">‹ Назад</button>
+      <button id="btn-delete-msg" class="btn ghost danger" type="button">Удалить</button>
+    </div>
+    <div class="sheet-body">
+      <h2 id="msg-subject"></h2>
+      <p id="msg-meta" class="muted small"></p>
+      <div id="msg-actions" class="actions"></div>
+      <div id="msg-content" class="msg-content"></div>
+    </div>
+  </div>
+
+  <!-- Список адресов -->
+  <div id="accounts" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="acc-title">
+    <div class="sheet-bar">
+      <button id="btn-acc-close" class="btn ghost" type="button">‹ Назад</button>
+      <button id="btn-acc-new" class="btn ghost" type="button">+ Новая</button>
+    </div>
+    <div class="sheet-body">
+      <h2 id="acc-title">Мои адреса</h2>
+      <p class="muted small">Пароли хранятся только в этом браузере. Удалил адрес — письма на него больше не придут.</p>
+      <ul id="acc-list" class="acc-list"></ul>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

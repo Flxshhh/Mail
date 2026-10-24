@@ -1,0 +1,16 @@
+{
+  "name": "Hide Email — одноразовая почта",
+  "short_name": "Почта",
+  "description": "Одноразовые адреса для регистраций: письма с подтверждением приходят прямо в приложение",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F5F3FF",
+  "theme_color": "#6D28D9",
+  "lang": "ru",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

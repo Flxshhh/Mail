@@ -1,0 +1,204 @@
+/* Hide Email — одноразовая почта. Плоский стиль, фиолетовый акцент.
+ * Шрифт Manrope лежит в fonts/. */
+
+@font-face {
+  font-family: "Manrope";
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/manrope-cyrillic-wght-normal.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Manrope";
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/manrope-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
+}
+
+:root {
+  --bg: #F5F3FF;
+  --card: #FFFFFF;
+  --text: #1E1B4B;
+  --muted: #5B5675;
+  --line: #E4DFFB;
+  --primary: #6D28D9;
+  --primary-soft: #EDE9FE;
+  --on-primary: #FFFFFF;
+  --ok: #15803D;
+  --danger: #B91C1C;
+  --radius: 16px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F0B1F;
+    --card: #1B1633;
+    --text: #EEEAFE;
+    --muted: #A9A3C8;
+    --line: #2E2752;
+    --primary: #A78BFA;
+    --primary-soft: #2A2150;
+    --on-primary: #160F33;
+    --ok: #4ADE80;
+    --danger: #F87171;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 "Manrope", system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+button { font: inherit; color: inherit; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+[hidden] { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 16px 8px; max-width: 640px; margin: 0 auto;
+}
+.topbar h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+
+main { max-width: 640px; margin: 0 auto; padding: 8px 16px 32px; display: grid; gap: 16px; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 0 16px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--card); font-weight: 700; cursor: pointer;
+  transition: transform .12s ease-out, opacity .12s;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .5; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn.big { min-height: 56px; font-size: 18px; width: 100%; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--primary); min-height: 44px; padding: 0 8px; }
+.btn.danger { color: var(--danger); }
+.chip {
+  border: 1px solid var(--line); background: var(--card); border-radius: 999px;
+  padding: 8px 14px; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.chip span { color: var(--primary); }
+
+.hero { text-align: center; padding: 32px 16px; display: grid; gap: 8px; }
+.hero-title { margin: 0; font-size: 22px; font-weight: 800; }
+.hero .muted { margin: 0 0 16px; }
+
+.address-card .label { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.address {
+  display: block; width: 100%; text-align: left; border: 0; background: var(--primary-soft);
+  border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer;
+  font: 600 17px/1.3 ui-monospace, "SF Mono", Menlo, monospace; word-break: break-all;
+}
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.inbox-head { display: flex; align-items: baseline; justify-content: space-between; margin: 8px 4px; }
+.inbox-head h2 { margin: 0; font-size: 18px; }
+.status { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.status.off .dot { background: var(--danger); }
+.status.busy .dot { animation: blink 1s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+.inbox { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.mail {
+  width: 100%; text-align: left; cursor: pointer; display: grid; gap: 2px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+}
+.mail:active { transform: scale(.99); }
+.mail.new { animation: arrive .35s cubic-bezier(.2, .8, .2, 1); }
+@keyframes arrive { from { opacity: 0; transform: translateY(-8px); } }
+.mail-top { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.mail-from { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-time { color: var(--muted); flex: none; }
+.mail-subject { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-intro { color: var(--muted); font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mail.unread .mail-from::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary); margin-right: 8px; vertical-align: middle;
+}
+
+.empty-inbox { text-align: center; padding: 32px 16px; }
+.empty-inbox p { margin: 4px 0; }
+.radar {
+  width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%;
+  background: var(--primary-soft); position: relative;
+}
+.radar::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--primary);
+  animation: ping 2s ease-out infinite;
+}
+@keyframes ping { from { transform: scale(.6); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+
+/* Полноэкранные листы (письмо, список адресов) */
+.sheet {
+  position: fixed; inset: 0; z-index: 10; background: var(--bg);
+  display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  animation: slide-up .28s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes slide-up { from { transform: translateY(24px); opacity: 0; } }
+.sheet-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px; border-bottom: 1px solid var(--line); max-width: 640px; width: 100%; margin: 0 auto;
+}
+.sheet-body {
+  flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: 16px; max-width: 640px; width: 100%; margin: 0 auto;
+}
+.sheet-body h2 { margin: 0 0 4px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+
+.actions { display: grid; gap: 8px; margin: 16px 0; }
+.actions:empty { display: none; }
+.action-title { font-size: 13px; font-weight: 700; color: var(--muted); margin: 4px 0 0; }
+.action-link {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 52px; padding: 10px 16px; border-radius: 12px; text-decoration: none;
+  background: var(--primary); color: var(--on-primary); font-weight: 700;
+}
+.action-link.secondary { background: var(--card); color: var(--primary); border: 1px solid var(--line); font-weight: 600; }
+.action-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-link small { opacity: .75; font-weight: 500; flex: none; }
+.code {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  border: 1px dashed var(--primary); border-radius: 12px; padding: 10px 16px; background: var(--card); cursor: pointer; width: 100%;
+}
+.code b { font: 700 24px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .12em; }
+.code small { color: var(--primary); font-weight: 700; }
+
+.msg-content { border-radius: 12px; overflow: hidden; background: #fff; border: 1px solid var(--line); }
+.msg-content iframe { display: block; width: 100%; border: 0; min-height: 200px; background: #fff; }
+.msg-content pre { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.5; font-family: inherit; color: #1E1B4B; }
+
+.acc-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+.acc {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 8px 8px 16px;
+}
+.acc.active { border-color: var(--primary); }
+.acc-main { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 6px 0; cursor: pointer; }
+.acc-addr { font: 600 15px/1.3 ui-monospace, "SF Mono", Menlo, monospace; word-break: break-all; }
+.acc-date { font-size: 13px; color: var(--muted); }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 20;
+  transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 12px 18px; border-radius: 12px;
+  font-weight: 700; font-size: 15px; max-width: calc(100% - 32px); text-align: center;
+  transition: opacity .2s, transform .2s cubic-bezier(.2, .8, .2, 1);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
