@@ -94,6 +94,12 @@ main { max-width: 640px; margin: 0 auto; padding: 8px 16px 32px; display: grid; 
 .hero-title { margin: 0; font-size: 22px; font-weight: 800; }
 .hero .muted { margin: 0 0 16px; }
 
+.error-card { border-color: var(--danger); }
+.error-card .error-title { margin: 0 0 8px; font-weight: 800; color: var(--danger); }
+.error-card ul { margin: 0 0 8px; padding-left: 20px; }
+.error-card a { color: var(--primary); font-weight: 700; }
+.error-card .muted { margin: 0; }
+
 .address-card .label { margin: 0 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .address {
   display: block; width: 100%; text-align: left; border: 0; background: var(--primary-soft);

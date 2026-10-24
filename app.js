@@ -80,8 +80,12 @@ function randomPassword() {
   return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 20);
 }
 
+// «Load failed» (Safari) и «Failed to fetch» (Chrome) — браузер вообще не получил ответа:
+// сервер недоступен из этой сети или запрос заблокирован
+const netError = e => e instanceof TypeError ? 'нет связи с сервером' : e.message;
+
 async function createAccount() {
-  let lastErr;
+  const errors = [];
   for (const base of PROVIDERS) {
     try {
       const domains = list(await api(base, '/domains')).filter(d => d.isActive !== false && !d.isPrivate);
@@ -92,15 +96,18 @@ async function createAccount() {
       acc.id = created.id;
       await login(acc);
       return acc;
-    } catch (e) { lastErr = e; }
+    } catch (e) { errors.push({ base, msg: netError(e) }); }
   }
-  throw lastErr || new Error('сервис недоступен');
+  const err = new Error('все сервисы недоступны');
+  err.details = errors;
+  throw err;
 }
 
 // ---------- действия ----------
 async function onCreate(btn) {
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Создаю…';
+  $('create-error').hidden = true;
   try {
     const acc = await createAccount();
     state.accounts.unshift(acc);
@@ -114,10 +121,28 @@ async function onCreate(btn) {
     const copied = await copy(acc.address);
     toast(copied ? 'Почта создана и скопирована' : 'Почта создана');
   } catch (e) {
-    toast('Не получилось создать почту: ' + e.message);
+    showCreateError(e.details || [{ base: '', msg: netError(e) }]);
   } finally {
     btn.disabled = false; btn.textContent = label;
   }
+}
+
+// Ошибку показываем карточкой, а не тостом: по ней нужно понять, что делать дальше
+function showCreateError(details) {
+  const box = $('create-error');
+  const ul = $('create-error-list');
+  ul.innerHTML = '';
+  for (const d of details) {
+    const li = el('li');
+    if (d.base) {
+      const a = el('a', '', new URL(d.base).hostname);
+      a.href = d.base + '/domains'; a.target = '_blank'; a.rel = 'noopener';
+      li.append(a, ': ');
+    }
+    li.append(d.msg);
+    ul.append(li);
+  }
+  box.hidden = false;
 }
 
 async function copy(text) {
